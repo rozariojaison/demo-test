@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>API Security Lab — Interactive Demo</title>
+<style>
+  :root {
+    --bg: #0d1117; --bg2: #161b22; --bg3: #21262d;
+    --border: #30363d; --border2: #484f58;
+    --green: #3fb950; --green-dim: #1a3a24; --green-glow: rgba(63,185,80,0.15);
+    --red: #f85149; --red-dim: #3d1a1a; --red-glow: rgba(248,81,73,0.15);
+    --yellow: #d29922; --yellow-dim: #3a2d0a;
+    --blue: #58a6ff; --blue-dim: #0d2340;
+    --purple: #bc8cff; --purple-dim: #2a1a40;
+    --text: #e6edf3; --text2: #8b949e; --text3: #484f58;
+    --font-mono: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; font-size:14px; min-height:100vh; }
+
+  /* ── Header ── */
+  header {
+    background:var(--bg2); border-bottom:1px solid var(--border);
+    padding:12px 24px; display:flex; align-items:center; gap:16px;
+    position:sticky; top:0; z-index:100;
+  }
+  .logo { font-size:18px; font-weight:700; letter-spacing:-0.5px; }
+  .logo span { color:var(--red); }
+  .subtitle { color:var(--text2); font-size:12px; flex:1; }
+  .mode-badge {
+    padding:4px 12px; border-radius:20px; font-size:12px; font-weight:700;
+    text-transform:uppercase; letter-spacing:1px; transition:all 0.3s;
+  }
+  .mode-badge.vulnerable { background:var(--red-dim); color:var(--red); border:1px solid var(--red); }
+  .mode-badge.secured { background:var(--green-dim); color:var(--green); border:1px solid var(--green); }
+  .mode-toggle {
+    display:flex; align-items:center; gap:8px; background:var(--bg3);
+    border:1px solid var(--border); border-radius:8px; padding:4px;
+  }
+  .mode-btn {
+    padding:6px 14px; border-radius:6px; border:none; cursor:pointer;
+    font-size:12px; font-weight:600; transition:all 0.2s; background:transparent; color:var(--text2);
+  }
+  .mode-btn.vuln.active { background:var(--red-dim); color:var(--red); }
+  .mode-btn.sec.active { background:var(--green-dim); color:var(--green); }
+  .mode-btn:hover { color:var(--text); }
+  .conn-dot { width:8px; height:8px; border-radius:50%; background:var(--green); animation:pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+  /* ── Layout ── */
+  .layout { display:grid; grid-template-columns:220px 1fr 320px; gap:0; height:calc(100vh - 57px); }
+
+  /* ── Sidebar ── */
+  .sidebar {
+    background:var(--bg2); border-right:1px solid var(--border);
+    padding:16px; overflow-y:auto; display:flex; flex-direction:column; gap:16px;
+  }
+  .stat-card { background:var(--bg3); border:1px solid var(--border); border-radius:8px; padding:12px; }
+  .stat-card h4 { color:var(--text2); font-size:11px; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px; }
+  .stat-row { display:flex; justify-content:space-between; align-items:center; padding:4px 0; }
+  .stat-label { color:var(--text2); font-size:12px; }
+  .stat-val { font-weight:700; font-size:14px; }
+  .run-all-btn {
+    width:100%; padding:10px; background:linear-gradient(135deg,#b91c1c,#7f1d1d);
+    border:1px solid var(--red); border-radius:8px; color:white; font-weight:700;
+    cursor:pointer; transition:all 0.2s; font-size:13px;
+  }
+  .run-all-btn:hover { background:linear-gradient(135deg,#dc2626,#991b1b); transform:translateY(-1px); box-shadow:0 4px 16px rgba(248,81,73,0.3); }
+  .run-all-btn:active { transform:translateY(0); }
+  .progress-bar { width:100%; height:4px; background:var(--bg3); border-radius:2px; overflow:hidden; margin-top:8px; }
+  .progress-fill { height:100%; background:var(--red); border-radius:2px; transition:width 0.3s; width:0%; }
+  .sidebar-links { display:flex; flex-direction:column; gap:4px; }
+  .sidebar-link { color:var(--blue); font-size:12px; text-decoration:none; padding:4px 8px; border-radius:4px; }
+  .sidebar-link:hover { background:var(--blue-dim); }
+
+  /* ── Main content ── */
+  .main { padding:16px; overflow-y:auto; display:flex; flex-direction:column; gap:12px; }
+  .section-title { font-size:11px; text-transform:uppercase; letter-spacing:2px; color:var(--text3); padding:4px 0 8px; border-bottom:1px solid var(--border); margin-bottom:4px; }
+
+  /* ── Attack Cards ── */
+  .attacks-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .attack-card {
+    background:var(--bg2); border:1px solid var(--border); border-radius:10px;
+    overflow:hidden; transition:all 0.3s;
+  }
+  .attack-card:hover { border-color:var(--border2); }
+  .attack-card.running { border-color:var(--yellow); box-shadow:0 0 20px rgba(210,153,34,0.2); }
+  .attack-card.vuln-result { border-color:var(--red); box-shadow:0 0 20px var(--red-glow); }
+  .attack-card.safe-result { border-color:var(--green); box-shadow:0 0 20px var(--green-glow); }
+  .card-header { padding:14px 16px; display:flex; align-items:flex-start; gap:10px; }
+  .owasp-badge {
+    padding:2px 8px; border-radius:4px; font-size:10px; font-weight:700; white-space:nowrap;
+    background:var(--purple-dim); color:var(--purple); border:1px solid var(--purple); margin-top:2px;
+  }
+  .card-title { font-weight:700; font-size:14px; margin-bottom:2px; }
+  .card-desc { color:var(--text2); font-size:12px; line-height:1.5; flex:1; }
+  .card-actions { padding:0 16px 14px; display:flex; align-items:center; gap:8px; }
+  .launch-btn {
+    padding:7px 16px; border-radius:6px; border:1px solid var(--border2);
+    background:var(--bg3); color:var(--text); cursor:pointer; font-size:12px;
+    font-weight:600; transition:all 0.2s; display:flex; align-items:center; gap:6px;
+  }
+  .launch-btn:hover { border-color:var(--blue); color:var(--blue); background:var(--blue-dim); }
+  .launch-btn:disabled { opacity:0.4; cursor:not-allowed; }
+  .launch-btn.running { border-color:var(--yellow); color:var(--yellow); }
+  .result-badge { padding:3px 10px; border-radius:4px; font-size:11px; font-weight:700; margin-left:auto; }
+  .result-badge.vuln { background:var(--red-dim); color:var(--red); }
+  .result-badge.safe { background:var(--green-dim); color:var(--green); }
+  .result-badge.running { background:var(--yellow-dim); color:var(--yellow); }
+
+  /* ── Result Panel ── */
+  .result-panel { border-top:1px solid var(--border); background:var(--bg); padding:12px 16px; display:none; }
+  .result-panel.visible { display:block; }
+  .result-table { width:100%; border-collapse:collapse; font-size:12px; font-family:var(--font-mono); }
+  .result-table th { color:var(--text2); text-align:left; padding:4px 8px; border-bottom:1px solid var(--border); }
+  .result-table td { padding:4px 8px; border-bottom:1px solid var(--border3,#1c2128); }
+  .ok { color:var(--green); } .warn { color:var(--red); } .dim { color:var(--text2); }
+  .result-summary {
+    margin-top:10px; padding:8px 12px; border-radius:6px; font-size:12px; font-weight:600;
+    display:flex; align-items:center; gap:8px;
+  }
+  .result-summary.vuln { background:var(--red-dim); color:var(--red); border:1px solid rgba(248,81,73,0.3); }
+  .result-summary.safe { background:var(--green-dim); color:var(--green); border:1px solid rgba(63,185,80,0.3); }
+
+  /* ── Terminal Panel ── */
+  .terminal-panel {
+    background:var(--bg2); border-left:1px solid var(--border);
+    display:flex; flex-direction:column;
+  }
+  .terminal-header {
+    padding:10px 16px; border-bottom:1px solid var(--border);
+    display:flex; align-items:center; gap:8px;
+  }
+  .terminal-title { font-size:12px; font-weight:600; color:var(--text2); flex:1; }
+  .clear-btn { padding:3px 10px; background:transparent; border:1px solid var(--border); border-radius:4px; color:var(--text2); cursor:pointer; font-size:11px; }
+  .clear-btn:hover { border-color:var(--border2); color:var(--text); }
+  .terminal-body { flex:1; overflow-y:auto; padding:12px; font-family:var(--font-mono); font-size:12px; line-height:1.6; }
+  .log-line { padding:1px 0; display:flex; gap:8px; }
+  .log-time { color:var(--text3); min-width:70px; }
+  .log-msg { word-break:break-all; }
+  .log-success { color:var(--green); }
+  .log-error { color:var(--red); }
+  .log-warn { color:var(--yellow); }
+  .log-info { color:var(--blue); }
+  .log-dim { color:var(--text2); }
+
+  /* ── Spinner ── */
+  .spinner { display:inline-block; width:12px; height:12px; border:2px solid currentColor; border-top-color:transparent; border-radius:50%; animation:spin 0.7s linear infinite; }
+  @keyframes spin { to{transform:rotate(360deg)} }
+
+  /* ── Scanning animation ── */
+  .scan-line { position:absolute; left:0; right:0; height:2px; background:linear-gradient(90deg,transparent,var(--green),transparent); animation:scan 2s ease-in-out infinite; pointer-events:none; }
+  @keyframes scan { 0%{top:0%;opacity:1} 100%{top:100%;opacity:0} }
+
+  /* ── Toast ── */
+  .toast { position:fixed; bottom:24px; right:24px; padding:10px 16px; border-radius:8px; font-size:13px; font-weight:600; z-index:999; animation:fadeIn 0.3s; }
+  .toast.success { background:var(--green-dim); color:var(--green); border:1px solid var(--green); }
+  .toast.error { background:var(--red-dim); color:var(--red); border:1px solid var(--red); }
+  @keyframes fadeIn { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+
+  scrollbar-width: thin; scrollbar-color: var(--border2) transparent;
+  ::-webkit-scrollbar { width:6px; } ::-webkit-scrollbar-track { background:transparent; } ::-webkit-scrollbar-thumb { background:var(--border2); border-radius:3px; }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header>
+  <div class="logo">API<span>Sec</span>Lab</div>
+  <div class="subtitle">OWASP API Security Top 10 — Interactive Demo</div>
+  <div class="conn-dot" id="connDot" title="Server status"></div>
+  <span class="mode-badge" id="modeBadge">Loading...</span>
+  <div class="mode-toggle">
+    <button class="mode-btn vuln" id="btnVuln" onclick="switchMode('vulnerable')">VULNERABLE</button>
+    <button class="mode-btn sec" id="btnSec" onclick="switchMode('secured')">SECURED</button>
+  </div>
+</header>
+
+<div class="layout">
+
+  <!-- Left Sidebar -->
+  <aside class="sidebar">
+    <div class="stat-card">
+      <h4>System Stats</h4>
+      <div class="stat-row"><span class="stat-label">Users</span><span class="stat-val" id="statUsers">—</span></div>
+      <div class="stat-row"><span class="stat-label">Products</span><span class="stat-val" id="statProducts">—</span></div>
+      <div class="stat-row"><span class="stat-label">Orders</span><span class="stat-val" id="statOrders">—</span></div>
+      <div class="stat-row"><span class="stat-label">Audit Events</span><span class="stat-val" id="statAudit">—</span></div>
+    </div>
+
+    <div class="stat-card">
+      <h4>Mode Status</h4>
+      <div class="stat-row"><span class="stat-label">Vulnerabilities</span><span class="stat-val" id="statVulns" style="color:var(--red)">—</span></div>
+      <div class="stat-row"><span class="stat-label">Protections</span><span class="stat-val" id="statProtections" style="color:var(--text2)">—</span></div>
+    </div>
+
+    <button class="run-all-btn" id="runAllBtn" onclick="runAllAttacks()">
+      ▶ RUN ALL ATTACKS
+    </button>
+    <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+
+    <div class="stat-card">
+      <h4>Quick Links</h4>
+      <div class="sidebar-links">
+        <a class="sidebar-link" href="/docs" target="_blank">📋 Swagger UI</a>
+        <a class="sidebar-link" href="/health" target="_blank">💚 Health Check</a>
+        <a class="sidebar-link" href="/demo/stats" target="_blank">📊 Demo Stats</a>
+      </div>
+    </div>
+
+    <div class="stat-card" style="font-size:11px;color:var(--text2);line-height:1.6;">
+      <h4>About</h4>
+      Demonstrates 5 OWASP API Security Top 10 vulnerabilities. Toggle mode above to see attacks succeed or get blocked.
+    </div>
+  </aside>
+
+  <!-- Main Content -->
+  <main class="main">
+    <div class="section-title">OWASP API Security Top 10 — Attack Demonstrations</div>
+
+    <div class="attacks-grid">
+
+      <!-- Card 1: BOLA -->
+      <div class="attack-card" id="card-bola">
+        <div class="card-header">
+          <div>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+              <span class="owasp-badge">API1:2023</span>
+              <span style="font-size:11px;color:var(--text2)">CVSS 8.1 HIGH</span>
+            </div>
+            <div class="card-title">Broken Object Level Auth (BOLA / IDOR)</div>
+            <div class="card-desc">User1 enumerates all 15 user profiles by guessing sequential integer IDs. In vulnerable mode: password hashes, admin flags, and UUIDs are all exposed.</div>
+          </div>
+        </div>
+        <div class="card-actions">
+          <button class="launch-btn" id="btn-bola" onclick="runAttack('bola')">▶ Launch Attack</button>
+          <span class="result-badge" id="badge-bola" style="display:none"></span>
+        </div>
+        <div class="result-panel" id="result-bola"></div>
+      </div>
+
+      <!-- Card 2: Mass Assignment -->
+      <div class="attack-card" id="card-mass">
+        <div class="card-header">
+          <div>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+              <span class="owasp-badge">API3:2023</span>
+              <span style="font-size:11px;color:var(--text2)">CVSS 7.5 HIGH</span>
+            </div>
+            <div class="card-title">Mass Assignment — Privilege Escalation</div>
+            <div class="card-desc">Registers a new user then sends <code style="background:var(--bg3);padding:1px 4px;border-radius:3px">is_admin: true</code> in the update payload. In vulnerable mode: the API blindly assigns any field sent.</div>
+          </div>
+        </div>
+        <div class="card-actions">
+          <button class="launch-btn" id="btn-mass" onclick="runAttack('mass')">▶ Launch Attack</button>
+          <span class="result-badge" id="badge-mass" style="display:none"></span>
+        </div>
+        <div class="result-panel" id="result-mass"></div>
+      </div>
+
+      <!-- Card 3: Data Exposure -->
+      <div class="attack-card" id="card-exposure">
+        <div class="card-header">
+          <div>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+              <span class="owasp-badge">API3:2023</span>
+              <span style="font-size:11px;color:var(--text2)">CVSS 7.5 HIGH</span>
+            </div>
+            <div class="card-title">Excessive Data Exposure</div>
+            <div class="card-desc">Audits what sensitive fields each endpoint returns. In vulnerable mode: password hashes, internal UUIDs, cost prices, and admin flags leak in every response.</div>
+          </div>
+        </div>
+        <div class="card-actions">
+          <button class="launch-btn" id="btn-exposure" onclick="runAttack('exposure')">▶ Launch Attack</button>
+          <span class="result-badge" id="badge-exposure" style="display:none"></span>
+        </div>
+        <div class="result-panel" id="result-exposure"></div>
+      </div>
+
+      <!-- Card 4: JWT -->
+      <div class="attack-card" id="card-jwt">
+        <div class="card-header">
+          <div>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+              <span class="owasp-badge">API2:2023</span>
+              <span style="font-size:11px;color:var(--text2)">CVSS 9.8 CRITICAL</span>
+            </div>
+            <div class="card-title">Broken Authentication — JWT Attacks</div>
+            <div class="card-desc">Fires three attacks: <strong>none-algorithm</strong> (strip signature), <strong>expired token</strong> (no expiry check), and <strong>role tamper</strong> (wrong secret). Vulnerable mode accepts forged tokens.</div>
+          </div>
+        </div>
+        <div class="card-actions">
+          <button class="launch-btn" id="btn-jwt" onclick="runAttack('jwt')">▶ Launch Attack</button>
+          <span class="result-badge" id="badge-jwt" style="display:none"></span>
+        </div>
+        <div class="result-panel" id="result-jwt"></div>
+      </div>
+
+      <!-- Card 5: Rate Limiting (full width) -->
+      <div class="attack-card" id="card-rate" style="grid-column:1/-1">
+        <div class="card-header">
+          <div>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+              <span class="owasp-badge">API4:2023</span>
+              <span style="font-size:11px;color:var(--text2)">CVSS 7.5 HIGH</span>
+            </div>
+            <div class="card-title">Unrestricted Resource Consumption — Brute Force Login</div>
+            <div class="card-desc">Fires 10 rapid POST /auth/login requests with wrong passwords. In vulnerable mode: all 10 return 401 with no throttling. In secured mode: rate limiter triggers 429 after 5 attempts with Retry-After header.</div>
+          </div>
+        </div>
+        <div class="card-actions">
+          <button class="launch-btn" id="btn-rate" onclick="runAttack('rate')">▶ Launch Attack</button>
+          <span class="result-badge" id="badge-rate" style="display:none"></span>
+        </div>
+        <div class="result-panel" id="result-rate"></div>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- Terminal Panel -->
+  <aside class="terminal-panel">
+    <div class="terminal-header">
+      <span style="font-size:14px;">⬛</span>
+      <span class="terminal-title">Live Output</span>
+      <button class="clear-btn" onclick="clearLog()">Clear</button>
+    </div>
+    <div class="terminal-body" id="terminalBody">
+      <div class="log-line"><span class="log-time">--:--:--</span><span class="log-msg log-dim">API Security Lab — waiting for attacks...</span></div>
+    </div>
+  </aside>
+
+</div>
+
+<script>
+const API = 'http://localhost:8001';
+let currentMode = 'vulnerable';
+
+// ── Logging ───────────────────────────────────────────────────────────────────
+function log(msg, type='info') {
+  const body = document.getElementById('terminalBody');
+  const now = new Date().toTimeString().slice(0,8);
+  const div = document.createElement('div');
+  div.className = 'log-line';
+  div.innerHTML = `<span class="log-time">${now}</span><span class="log-msg log-${type}">${msg}</span>`;
+  body.appendChild(div);
+  body.scrollTop = body.scrollHeight;
+}
+function clearLog() {
+  document.getElementById('terminalBody').innerHTML = '';
+  log('Terminal cleared.', 'dim');
+}
+
+// ── Server health polling ─────────────────────────────────────────────────────
+async function pollHealth() {
+  try {
+    const r = await fetch(`${API}/health`);
+    const data = await r.json();
+    currentMode = data.mode;
+    updateModeUI(data.mode);
+    document.getElementById('connDot').style.background = '#3fb950';
+    loadStats();
+  } catch {
+    document.getElementById('connDot').style.background = '#f85149';
+    document.getElementById('modeBadge').textContent = 'OFFLINE';
+    document.getElementById('modeBadge').className = 'mode-badge';
+    document.getElementById('modeBadge').style.background = 'var(--red-dim)';
+    document.getElementById('modeBadge').style.color = 'var(--red)';
+  }
+}
+
+function updateModeUI(mode) {
+  const badge = document.getElementById('modeBadge');
+  badge.textContent = mode.toUpperCase() + ' MODE';
+  badge.className = `mode-badge ${mode}`;
+  document.getElementById('btnVuln').className = `mode-btn vuln ${mode === 'vulnerable' ? 'active' : ''}`;
+  document.getElementById('btnSec').className = `mode-btn sec ${mode === 'secured' ? 'active' : ''}`;
+  // Update progress button color
+  const runBtn = document.getElementById('runAllBtn');
+  runBtn.style.background = mode === 'secured'
+    ? 'linear-gradient(135deg,#1a3a24,#0d2318)' : 'linear-gradient(135deg,#b91c1c,#7f1d1d)';
+  runBtn.style.borderColor = mode === 'secured' ? 'var(--green)' : 'var(--red)';
+  document.getElementById('statVulns').style.color = mode === 'vulnerable' ? 'var(--red)' : 'var(--green)';
+  document.getElementById('statVulns').textContent = mode === 'vulnerable' ? 'ACTIVE' : 'PROTECTED';
+  document.getElementById('statProtections').style.color = mode === 'secured' ? 'var(--green)' : 'var(--text3)';
+  document.getElementById('statProtections').textContent = mode === 'secured' ? 'ACTIVE' : 'INACTIVE';
+}
+
+async function loadStats() {
+  try {
+    const r = await fetch(`${API}/demo/stats`);
+    const d = await r.json();
+    document.getElementById('statUsers').textContent = d.total_users;
+    document.getElementById('statProducts').textContent = d.total_products;
+    document.getElementById('statOrders').textContent = d.total_orders;
+    document.getElementById('statAudit').textContent = d.audit_events;
+  } catch {}
+}
+
+// ── Mode switching ────────────────────────────────────────────────────────────
+async function switchMode(mode) {
+  if (mode === currentMode) return;
+  log(`Switching to ${mode.toUpperCase()} mode...`, 'warn');
+  try {
+    const r = await fetch(`${API}/demo/switch/${mode}`, {method:'POST'});
+    const d = await r.json();
+    currentMode = d.mode;
+    updateModeUI(d.mode);
+    log(`Mode switched → ${d.mode.toUpperCase()}`, d.mode === 'vulnerable' ? 'error' : 'success');
+    showToast(`Switched to ${d.mode.toUpperCase()} mode`, d.mode === 'secured' ? 'success' : 'error');
+    // Reset all card states
+    ['bola','mass','exposure','jwt','rate'].forEach(resetCard);
+  } catch(e) {
+    log(`Switch failed: ${e.message}`, 'error');
+  }
+}
+
+function resetCard(name) {
+  const card = document.getElementById(`card-${name}`);
+  const badge = document.getElementById(`badge-${name}`);
+  const result = document.getElementById(`result-${name}`);
+  const btn = document.getElementById(`btn-${name}`);
+  card.className = 'attack-card';
+  badge.style.display = 'none';
+  result.className = 'result-panel';
+  result.innerHTML = '';
+  btn.textContent = '▶ Launch Attack';
+  btn.disabled = false;
+}
+
+// ── Attack runners ────────────────────────────────────────────────────────────
+async function runAttack(name) {
+  const btn = document.getElementById(`btn-${name}`);
+  const badge = document.getElementById(`badge-${name}`);
+  const result = document.getElementById(`result-${name}`);
+  const card = document.getElementById(`card-${name}`);
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Running...';
+  btn.className = 'launch-btn running';
+  card.className = 'attack-card running';
+  badge.style.display = 'inline-block';
+  badge.className = 'result-badge running';
+  badge.textContent = 'RUNNING';
+  log(`Launching ${name.toUpperCase()} attack (${currentMode} mode)...`, 'warn');
+
+  try {
+    const endpoints = {
+      bola: {url: `${API}/demo/bola`, method: 'POST'},
+      mass: {url: `${API}/demo/mass-assignment`, method: 'POST'},
+      exposure: {url: `${API}/demo/data-exposure`, method: 'GET'},
+      jwt: {url: `${API}/demo/jwt`, method: 'POST'},
+      rate: {url: `${API}/demo/rate-limit`, method: 'POST'},
+    };
+    const ep = endpoints[name];
+    const r = await fetch(ep.url, {method: ep.method, headers: {'Content-Type':'application/json'}});
+    const data = await r.json();
+    const isVuln = data.vulnerable;
+    card.className = `attack-card ${isVuln ? 'vuln-result' : 'safe-result'}`;
+    badge.className = `result-badge ${isVuln ? 'vuln' : 'safe'}`;
+    badge.textContent = isVuln ? '⚠ VULNERABLE' : '✓ BLOCKED';
+    btn.className = 'launch-btn';
+    btn.textContent = '↺ Run Again';
+    btn.disabled = false;
+    renderResult(name, data);
+    log(`${name.toUpperCase()} → ${isVuln ? 'VULNERABLE' : 'BLOCKED'}`, isVuln ? 'error' : 'success');
+  } catch(e) {
+    badge.className = 'result-badge';
+    badge.style.background = 'var(--yellow-dim)';
+    badge.style.color = 'var(--yellow)';
+    badge.textContent = 'ERROR';
+    btn.className = 'launch-btn';
+    btn.textContent = '↺ Retry';
+    btn.disabled = false;
+    card.className = 'attack-card';
+    log(`Error: ${e.message}`, 'error');
+  }
+}
+
+// ── Result renderers ──────────────────────────────────────────────────────────
+function renderResult(name, data) {
+  const panel = document.getElementById(`result-${name}`);
+  panel.className = 'result-panel visible';
+  const html = {bola: renderBola, mass: renderMass, exposure: renderExposure, jwt: renderJwt, rate: renderRate}[name];
+  panel.innerHTML = html(data);
+}
+
+function renderBola(d) {
+  const rows = d.results.map(r => {
+    const sc = r.status === 200 ? '<span class="warn">200 OK</span>' : '<span class="ok">403 Forbidden</span>';
+    const hash = r.hash_leaked ? '<span class="warn">LEAKED</span>' : '<span class="ok">hidden</span>';
+    const admin = r.admin_leaked ? '<span class="warn">LEAKED</span>' : '<span class="ok">hidden</span>';
+    const user = r.username ? `<span class="dim">${r.username}</span>` : '<span class="dim">—</span>';
+    return `<tr><td>${r.id}</td><td>${sc}</td><td>${user}</td><td>${hash}</td><td>${admin}</td></tr>`;
+  }).join('');
+  const cls = d.vulnerable ? 'vuln' : 'safe';
+  const msg = d.vulnerable
+    ? `⚠ BOLA CONFIRMED — ${d.summary.exposed}/15 profiles exposed, password hashes and admin flags leaked`
+    : `✓ BOLA BLOCKED — Only own profile returned, 14/15 cross-user requests returned 403 Forbidden`;
+  return `
+    <table class="result-table">
+      <tr><th>User ID</th><th>Status</th><th>Username</th><th>Hash Leaked?</th><th>is_admin Leaked?</th></tr>
+      ${rows}
+    </table>
+    <div class="result-summary ${cls}">${msg}</div>`;
+}
+
+function renderMass(d) {
+  const cls = d.vulnerable ? 'vuln' : 'safe';
+  const adminBefore = `<span class="dim">${d.before.is_admin}</span>`;
+  const adminAfter = d.after.is_admin
+    ? '<span class="warn">TRUE (escalated!)</span>'
+    : '<span class="ok">false (blocked)</span>';
+  const roleBefore = `<span class="dim">${d.before.role}</span>`;
+  const roleAfter = d.after.role === 'admin' && d.vulnerable
+    ? '<span class="warn">admin (escalated!)</span>'
+    : `<span class="ok">${d.after.role}</span>`;
+  const msg = d.vulnerable
+    ? `⚠ PRIVILEGE ESCALATION — is_admin changed from false → true via API payload`
+    : `✓ MASS ASSIGNMENT BLOCKED — is_admin and role fields ignored, only email/username accepted`;
+  return `
+    <table class="result-table">
+      <tr><th>Field</th><th>Sent in Payload</th><th>Before</th><th>After</th></tr>
+      <tr><td>is_admin</td><td><span class="warn">true</span></td><td>${adminBefore}</td><td>${adminAfter}</td></tr>
+      <tr><td>role</td><td><span class="warn">admin</span></td><td>${roleBefore}</td><td>${roleAfter}</td></tr>
+      <tr><td>email</td><td>hacked@evil.com</td><td>—</td><td class="dim">hacked@evil.com</td></tr>
+    </table>
+    <div class="result-summary ${cls}">${msg}</div>`;
+}
+
+function renderExposure(d) {
+  const rows = d.results.map(r => {
+    const fields = r.exposed_fields.length > 0
+      ? r.exposed_fields.map(f => `<span class="warn">${f}</span>`).join(', ')
+      : '<span class="ok">none exposed</span>';
+    const safe = r.safe ? '<span class="ok">SAFE</span>' : '<span class="warn">EXPOSED</span>';
+    return `<tr><td class="dim">${r.endpoint}</td><td>${fields}</td><td>${safe}</td></tr>`;
+  }).join('');
+  const cls = d.vulnerable ? 'vuln' : 'safe';
+  const msg = d.vulnerable
+    ? `⚠ ${d.total_exposed_fields} sensitive fields leaked — password_hash, internal_id, is_admin, internal_cost`
+    : `✓ All sensitive fields hidden — response schemas enforce field allowlists`;
+  return `
+    <table class="result-table">
+      <tr><th>Endpoint</th><th>Exposed Fields</th><th>Status</th></tr>
+      ${rows}
+    </table>
+    <div class="result-summary ${cls}">${msg}</div>`;
+}
+
+function renderJwt(d) {
+  const rows = d.results.map(r => {
+    const acc = r.accepted
+      ? '<span class="warn">ACCEPTED (bypassed!)</span>'
+      : '<span class="ok">REJECTED (401)</span>';
+    return `<tr><td class="dim">${r.attack}</td><td class="dim" style="font-size:11px">${r.token_preview}</td><td>${r.status_code}</td><td>${acc}</td></tr>`;
+  }).join('');
+  const cls = d.vulnerable ? 'vuln' : 'safe';
+  const msg = d.vulnerable
+    ? `⚠ ${d.bypassed}/${d.total} JWT attacks bypassed — none-alg and expired tokens accepted`
+    : `✓ All 3 JWT attacks rejected — algorithm validation and expiry checks enforced`;
+  return `
+    <table class="result-table">
+      <tr><th>Attack</th><th>Token Preview</th><th>HTTP</th><th>Result</th></tr>
+      ${rows}
+    </table>
+    <div class="result-summary ${cls}">${msg}</div>`;
+}
+
+function renderRate(d) {
+  const rows = d.results.map(r => {
+    const sc = r.status_code === 429
+      ? '<span class="ok">429 Rate Limited</span>'
+      : '<span class="warn">401 Allowed</span>';
+    return `<tr><td>${r.attempt}</td><td class="dim">${r.password}</td><td>${sc}</td></tr>`;
+  }).join('');
+  const cls = d.vulnerable ? 'vuln' : 'safe';
+  const msg = d.vulnerable
+    ? `⚠ NO RATE LIMITING — All 10 attempts allowed, brute force possible`
+    : `✓ RATE LIMITER TRIGGERED at attempt #${d.hit_limit_at} — ${d.blocked_count}/10 requests blocked (429)`;
+  return `
+    <table class="result-table">
+      <tr><th>Attempt</th><th>Password Tried</th><th>Response</th></tr>
+      ${rows}
+    </table>
+    <div class="result-summary ${cls}">${msg}</div>`;
+}
+
+// ── Run all attacks ───────────────────────────────────────────────────────────
+async function runAllAttacks() {
+  const attacks = ['bola','mass','exposure','jwt','rate'];
+  const btn = document.getElementById('runAllBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Running All...';
+  const fill = document.getElementById('progressFill');
+  log('─── Running all 5 attacks ───', 'info');
+  for (let i = 0; i < attacks.length; i++) {
+    fill.style.width = `${(i / attacks.length) * 100}%`;
+    fill.style.background = currentMode === 'vulnerable' ? 'var(--red)' : 'var(--green)';
+    await runAttack(attacks[i]);
+    await new Promise(r => setTimeout(r, 600));
+  }
+  fill.style.width = '100%';
+  btn.disabled = false;
+  btn.textContent = '▶ RUN ALL ATTACKS';
+  log('─── All attacks complete ───', 'info');
+  setTimeout(() => { fill.style.width = '0%'; }, 2000);
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+function showToast(msg, type='success') {
+  const t = document.createElement('div');
+  t.className = `toast ${type}`;
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3000);
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+pollHealth();
+setInterval(pollHealth, 5000);
+log('Connecting to API server...', 'dim');
+</script>
+</body>
+</html>

@@ -1,0 +1,43 @@
+# Secrets — NEVER commit
+secrets/
+*.pem
+*.key
+
+# Environment files
+.env
+.env.local
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Test / coverage
+.coverage
+coverage.xml
+htmlcov/
+.pytest_cache/
+*.xml
+
+# Reports (auto-generated)
+reports/bola_enum_results.json
+report_html.html
+report_json.json
+bandit-report.json
+
+# SQLite demo database (runtime artifact)
+*.db
+demo_lab.db
+
+# Docker volumes
+postgres_data/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
