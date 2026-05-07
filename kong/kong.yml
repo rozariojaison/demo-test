@@ -1,0 +1,131 @@
+_format_version: "3.0"
+_transform: true
+
+# Kong DB-less declarative configuration
+# Loaded via KONG_DECLARATIVE_CONFIG=/kong/kong.yml
+# All rate limiting uses Redis backend for accurate distributed counting
+
+services:
+  - name: api-security-lab
+    url: http://app:8000
+    connect_timeout: 5000
+    read_timeout: 10000
+    write_timeout: 10000
+    retries: 0
+
+    routes:
+      # ── /auth/login — strictest limit (credential stuffing prevention) ──────
+      - name: auth-login-route
+        paths: ["/auth/login"]
+        methods: ["POST"]
+        strip_path: false
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 5
+              policy: redis
+              redis_host: redis
+              redis_port: 6379
+              limit_by: ip
+              error_code: 429
+              error_message: "Too many login attempts. Please wait."
+              hide_client_headers: false
+
+      # ── /auth/* — general auth endpoints ─────────────────────────────────────
+      - name: auth-other-route
+        paths: ["/auth"]
+        methods: ["POST", "GET"]
+        strip_path: false
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 30
+              policy: redis
+              redis_host: redis
+              redis_port: 6379
+              limit_by: ip
+              error_code: 429
+
+      # ── /api/* — standard API endpoints ──────────────────────────────────────
+      - name: api-route
+        paths: ["/api"]
+        strip_path: false
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 100
+              hour: 1000
+              policy: redis
+              redis_host: redis
+              redis_port: 6379
+              limit_by: ip
+              error_code: 429
+              hide_client_headers: false
+          - name: request-size-limiting
+            config:
+              allowed_payload_size: 1
+          - name: response-transformer
+            config:
+              remove:
+                headers:
+                  - Server
+                  - X-Powered-By
+
+      # ── /admin/* — privileged endpoints, strictest limits ────────────────────
+      - name: admin-route
+        paths: ["/admin"]
+        strip_path: false
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 10
+              policy: redis
+              redis_host: redis
+              redis_port: 6379
+              limit_by: ip
+              error_code: 429
+          - name: ip-restriction
+            config:
+              allow:
+                - "127.0.0.1"
+                - "10.0.0.0/8"
+                - "172.16.0.0/12"
+                - "192.168.0.0/16"
+
+      # ── /health — no rate limiting ────────────────────────────────────────────
+      - name: health-route
+        paths: ["/health", "/docs", "/redoc", "/openapi.json"]
+        strip_path: false
+
+# ── Global plugins ────────────────────────────────────────────────────────────
+plugins:
+  - name: cors
+    config:
+      origins:
+        - "*"
+      methods:
+        - GET
+        - POST
+        - PUT
+        - DELETE
+        - OPTIONS
+        - PATCH
+      headers:
+        - Authorization
+        - Content-Type
+        - X-Request-ID
+      max_age: 3600
+
+  - name: request-id
+    config:
+      header_name: X-Request-ID
+      generator: uuid
+      echo_downstream: true
+
+  - name: prometheus
+    config:
+      per_consumer: true
+      status_code_metrics: true
+      latency_metrics: true
+      bandwidth_metrics: true
+      upstream_health_metrics: true

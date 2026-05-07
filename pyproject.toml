@@ -1,0 +1,46 @@
+[project]
+name = "api-security-lab"
+version = "1.0.0"
+description = "API Security Testing & Rate-Limiting Defence Lab"
+requires-python = ">=3.12"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+select = ["E", "F", "W", "I", "N", "B", "A"]
+
+[tool.ruff.per-file-ignores]
+# Intentionally vulnerable code — suppress security warnings
+"app/routers/auth.py" = ["S105", "S106", "S107"]
+"app/security/jwt_utils.py" = ["S105", "S106"]
+"migrations/versions/0002_seed_data.py" = ["S105", "S106"]
+"scripts/seed_db.py" = ["S105", "S106"]
+# Offensive tools — skip all security lint
+"offensive/*" = ["S", "B", "A"]
+# Tests — allow assert statements
+"tests/*" = ["S101", "S105", "S106"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "vulnerable_mode: tests run against vulnerable mode (expect vulnerabilities to be present)",
+    "secured_mode: tests run against secured mode (expect vulnerabilities to be blocked)",
+    "unit: unit tests — no external dependencies",
+    "integration: integration tests — requires PostgreSQL and Redis",
+    "security: security-focused tests",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
+
+[tool.mypy]
+python_version = "3.12"
+strict = false
+ignore_missing_imports = true
+exclude = ["offensive/", "tests/", "migrations/", "scripts/"]
+
+[tool.bandit]
+exclude_dirs = ["tests", "offensive", "scripts"]
+skips = ["B101"]  # assert_used — OK in tests

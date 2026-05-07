@@ -1,0 +1,340 @@
+{
+  "info": {
+    "name": "API Security Lab",
+    "description": "Complete attack and security validation collection for the API Security Testing & Rate-Limiting Defence Lab.\n\nUse with vulnerable.environment.json or secured.environment.json.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {"key": "base_url", "value": "http://localhost:8000"},
+    {"key": "access_token", "value": ""},
+    {"key": "admin_token", "value": ""},
+    {"key": "refresh_token", "value": ""},
+    {"key": "own_user_id", "value": "1"},
+    {"key": "other_user_id", "value": "5"},
+    {"key": "own_order_id", "value": "1"},
+    {"key": "other_order_id", "value": "9"}
+  ],
+  "item": [
+    {
+      "name": "00 - Setup",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/health"
+          },
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('Status 200', () => pm.response.to.have.status(200));",
+            "pm.test('Mode present', () => pm.expect(pm.response.json()).to.have.property('mode'));"
+          ]}}]
+        },
+        {
+          "name": "API Info",
+          "request": {"method": "GET", "url": "{{base_url}}/"}
+        }
+      ]
+    },
+    {
+      "name": "01 - Authentication",
+      "item": [
+        {
+          "name": "Register User",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/auth/register",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{\"username\": \"testuser\", \"email\": \"test@lab.local\", \"password\": \"TestPass123!\"}"}
+          },
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('Status 200', () => pm.response.to.have.status(200));",
+            "const data = pm.response.json();",
+            "pm.collectionVariables.set('access_token', data.access_token);",
+            "if (data.refresh_token) pm.collectionVariables.set('refresh_token', data.refresh_token);"
+          ]}}]
+        },
+        {
+          "name": "Login (Valid)",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/auth/login",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{\"username\": \"user1\", \"password\": \"password1\"}"}
+          },
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('Status 200', () => pm.response.to.have.status(200));",
+            "pm.test('Token present', () => pm.expect(pm.response.json()).to.have.property('access_token'));",
+            "pm.collectionVariables.set('access_token', pm.response.json().access_token);"
+          ]}}]
+        },
+        {
+          "name": "Login (Invalid Password)",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/auth/login",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{\"username\": \"user1\", \"password\": \"wrongpassword\"}"}
+          },
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('Status 401', () => pm.response.to.have.status(401));"
+          ]}}]
+        },
+        {
+          "name": "Login Admin",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/auth/login",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{\"username\": \"user14\", \"password\": \"password14\"}"}
+          },
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.collectionVariables.set('admin_token', pm.response.json().access_token);"
+          ]}}]
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/auth/logout",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{access_token}}"},
+              {"key": "Content-Type", "value": "application/json"}
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 - User Management",
+      "item": [
+        {
+          "name": "Get Own Profile",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/users/{{own_user_id}}/profile",
+            "header": [{"key": "Authorization", "value": "Bearer {{access_token}}"}]
+          },
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('Status 200 or 403', () => pm.expect([200, 403]).to.include(pm.response.code));"
+          ]}}]
+        },
+        {
+          "name": "Get OTHER User Profile (BOLA Demo)",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/users/{{other_user_id}}/profile",
+            "header": [{"key": "Authorization", "value": "Bearer {{access_token}}"}]
+          },
+          "event": [{"listen": "test", "script": {"exec": [
+            "const status = pm.response.code;",
+            "if (status === 200) {",
+            "  pm.test('VULNERABLE: Cross-user access allowed', () => pm.expect(status).to.equal(200));",
+            "  const d = pm.response.json();",
+            "  pm.test('Sensitive fields check', () => { if (d.password_hash) pm.expect(d).to.have.property('password_hash'); });",
+            "} else {",
+            "  pm.test('SECURED: Cross-user access blocked (403)', () => pm.expect(status).to.equal(403));",
+            "}"
+          ]}}]
+        },
+        {
+          "name": "Mass Assignment Attack",
+          "request": {
+            "method": "PUT",
+            "url": "{{base_url}}/api/users/{{own_user_id}}",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{access_token}}"},
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {"mode": "raw", "raw": "{\"username\": \"user1\", \"email\": \"user1@lab.local\", \"is_admin\": true, \"role\": \"admin\"}"}
+          },
+          "event": [{"listen": "test", "script": {"exec": [
+            "const s = pm.response.code;",
+            "if (s === 200) {",
+            "  pm.test('VULNERABLE: Mass assignment accepted', () => pm.expect(s).to.equal(200));",
+            "  pm.test('is_admin escalated', () => pm.expect(pm.response.json().is_admin).to.be.true);",
+            "} else {",
+            "  pm.test('SECURED: Mass assignment blocked (' + s + ')', () => pm.expect([422, 403]).to.include(s));",
+            "}"
+          ]}}]
+        }
+      ]
+    },
+    {
+      "name": "03 - Products (BOLA via Sequential IDs)",
+      "item": [
+        {
+          "name": "List Products",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/products",
+            "header": [{"key": "Authorization", "value": "Bearer {{access_token}}"}]
+          },
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('Status 200', () => pm.response.to.have.status(200));",
+            "const d = pm.response.json();",
+            "if (d.length && d[0].internal_cost !== undefined) {",
+            "  pm.test('VULNERABLE: internal_cost exposed', () => pm.expect(d[0]).to.have.property('internal_cost'));",
+            "} else {",
+            "  pm.test('SECURED: internal_cost hidden', () => pm.expect(d[0]).to.not.have.property('internal_cost'));",
+            "}"
+          ]}}]
+        },
+        {
+          "name": "Get Product by Sequential ID 1",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/products/1",
+            "header": [{"key": "Authorization", "value": "Bearer {{access_token}}"}]
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 - Orders (BOLA Demo)",
+      "item": [
+        {
+          "name": "Create Order",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/orders",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{access_token}}"},
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {"mode": "raw", "raw": "{\"items\": [{\"product_id\": 1, \"quantity\": 2}], \"shipping_address\": {\"street\": \"1 Test St\"}}"}
+          },
+          "event": [{"listen": "test", "script": {"exec": [
+            "if (pm.response.code === 200) { pm.collectionVariables.set('own_order_id', pm.response.json().id); }"
+          ]}}]
+        },
+        {
+          "name": "Get Other User Order (BOLA Demo)",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/orders/{{other_order_id}}",
+            "header": [{"key": "Authorization", "value": "Bearer {{access_token}}"}]
+          },
+          "event": [{"listen": "test", "script": {"exec": [
+            "const s = pm.response.code;",
+            "if (s === 200) { pm.test('VULNERABLE: Other user order accessible', () => pm.expect(s).to.equal(200)); }",
+            "else { pm.test('SECURED: Other user order blocked (' + s + ')', () => pm.expect(s).to.equal(403)); }"
+          ]}}]
+        }
+      ]
+    },
+    {
+      "name": "05 - Admin",
+      "item": [
+        {
+          "name": "List All Users (Admin)",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/admin/users",
+            "header": [{"key": "Authorization", "value": "Bearer {{admin_token}}"}]
+          },
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('Status 200', () => pm.response.to.have.status(200));"
+          ]}}]
+        },
+        {
+          "name": "Admin Route Without Admin Token",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/admin/users",
+            "header": [{"key": "Authorization", "value": "Bearer {{access_token}}"}]
+          },
+          "event": [{"listen": "test", "script": {"exec": [
+            "const s = pm.response.code;",
+            "if (s === 200) { pm.test('VULNERABLE: Admin route accessible without admin role', () => pm.expect(s).to.equal(200)); }",
+            "else { pm.test('SECURED: Admin route blocked (' + s + ')', () => pm.expect(s).to.equal(403)); }"
+          ]}}]
+        },
+        {
+          "name": "Get Stats",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/admin/stats",
+            "header": [{"key": "Authorization", "value": "Bearer {{admin_token}}"}]
+          }
+        }
+      ]
+    },
+    {
+      "name": "06 - Attack Scenarios",
+      "item": [
+        {
+          "name": "JWT None Algorithm Attack",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/users/1/profile",
+            "header": [{"key": "Authorization", "value": "Bearer eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJzdWIiOiIxIiwicm9sZXMiOlsiYWRtaW4iXSwiaXNfYWRtaW4iOnRydWV9."}]
+          },
+          "event": [{"listen": "test", "script": {"exec": [
+            "const s = pm.response.code;",
+            "if (s === 200) { pm.test('VULNERABLE: none-alg token accepted', () => pm.expect(s).to.equal(200)); }",
+            "else { pm.test('SECURED: none-alg token rejected (' + s + ')', () => pm.expect([401,403]).to.include(s)); }"
+          ]}}]
+        },
+        {
+          "name": "Rate Limit Test (7 rapid requests)",
+          "event": [
+            {"listen": "prerequest", "script": {"exec": ["pm.collectionVariables.set('attempt', (parseInt(pm.collectionVariables.get('attempt') || 0) + 1).toString());"]}},
+            {"listen": "test", "script": {"exec": [
+              "const s = pm.response.code;",
+              "const attempt = pm.collectionVariables.get('attempt');",
+              "if (s === 429) { pm.test('SECURED: Rate limit hit at attempt ' + attempt, () => pm.expect(s).to.equal(429)); pm.expect(pm.response.headers.get('Retry-After')).to.exist; }",
+              "else { pm.test('Attempt ' + attempt + ' allowed (status ' + s + ')', () => true); }"
+            ]}}],
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/auth/login",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{\"username\": \"user1\", \"password\": \"wrong\"}"}
+          }
+        }
+      ]
+    },
+    {
+      "name": "07 - Security Validation (Run in Secured Mode)",
+      "item": [
+        {
+          "name": "BOLA Must Be Blocked",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/users/{{other_user_id}}/profile",
+            "header": [{"key": "Authorization", "value": "Bearer {{access_token}}"}]
+          },
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('SECURED: BOLA blocked with 403', () => pm.response.to.have.status(403));"
+          ]}}]
+        },
+        {
+          "name": "Sensitive Fields Must Be Absent",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/users/{{own_user_id}}/profile",
+            "header": [{"key": "Authorization", "value": "Bearer {{access_token}}"}]
+          },
+          "event": [{"listen": "test", "script": {"exec": [
+            "if (pm.response.code === 200) {",
+            "  const d = pm.response.json();",
+            "  pm.test('No password_hash', () => pm.expect(d).to.not.have.property('password_hash'));",
+            "  pm.test('No internal_id', () => pm.expect(d).to.not.have.property('internal_id'));",
+            "  pm.test('No failed_login_count', () => pm.expect(d).to.not.have.property('failed_login_count'));",
+            "}"
+          ]}}]
+        },
+        {
+          "name": "Unauthenticated Request Returns 401",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/users/1/profile"
+          },
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('Status 401', () => pm.response.to.have.status(401));"
+          ]}}]
+        }
+      ]
+    }
+  ]
+}

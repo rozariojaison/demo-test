@@ -1,0 +1,15 @@
+{
+  "name": "API Security Lab — Vulnerable Mode",
+  "values": [
+    {"key": "base_url", "value": "http://localhost:8000", "enabled": true},
+    {"key": "mode", "value": "vulnerable", "enabled": true},
+    {"key": "access_token", "value": "", "enabled": true},
+    {"key": "admin_token", "value": "", "enabled": true},
+    {"key": "refresh_token", "value": "", "enabled": true},
+    {"key": "own_user_id", "value": "1", "enabled": true},
+    {"key": "other_user_id", "value": "5", "enabled": true},
+    {"key": "own_order_id", "value": "1", "enabled": true},
+    {"key": "other_order_id", "value": "9", "enabled": true},
+    {"key": "jwt_secret", "value": "secret", "enabled": true}
+  ]
+}

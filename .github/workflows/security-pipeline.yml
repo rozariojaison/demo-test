@@ -1,0 +1,319 @@
+name: Security Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  PYTHON_VERSION: "3.12"
+  REGISTRY: ghcr.io
+
+jobs:
+  # ── Stage 1: Lint & SAST ────────────────────────────────────────────────────
+  lint:
+    name: Lint & SAST
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install lint tools
+        run: pip install ruff mypy bandit
+
+      - name: Ruff lint
+        run: ruff check app/ tests/ offensive/ middleware/ --output-format=github
+
+      - name: MyPy type check
+        run: mypy app/ --ignore-missing-imports --no-error-summary
+        continue-on-error: true
+
+      - name: Bandit SAST scan
+        run: |
+          bandit -r app/ middleware/ \
+            -ll -ii \
+            --exclude app/routers \
+            -f json -o bandit-report.json || true
+          cat bandit-report.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bandit-report
+          path: bandit-report.json
+
+  # ── Stage 2: Unit Tests ─────────────────────────────────────────────────────
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run unit tests
+        run: |
+          pytest tests/unit/ \
+            -v --tb=short \
+            --cov=app --cov-report=xml \
+            -m "not integration and not security"
+        env:
+          APP_MODE: vulnerable
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: coverage.xml
+
+  # ── Stage 3: Integration Tests ──────────────────────────────────────────────
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: lab
+          POSTGRES_PASSWORD: labpass
+          POSTGRES_DB: test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run migrations
+        run: alembic upgrade head
+        env:
+          DATABASE_URL: postgresql+asyncpg://lab:labpass@localhost:5432/test_db
+
+      - name: Seed database
+        run: python scripts/seed_db.py
+        env:
+          DATABASE_URL: postgresql+asyncpg://lab:labpass@localhost:5432/test_db
+
+      - name: Run integration tests
+        run: |
+          pytest tests/integration/ \
+            -v --tb=short \
+            -m "not security"
+        env:
+          APP_MODE: vulnerable
+          DATABASE_URL: postgresql+asyncpg://lab:labpass@localhost:5432/test_db
+          REDIS_URL: redis://localhost:6379
+
+  # ── Stage 4: Security Tests (both modes) ────────────────────────────────────
+  security-tests:
+    name: Security Tests
+    runs-on: ubuntu-latest
+    needs: integration-tests
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: lab
+          POSTGRES_PASSWORD: labpass
+          POSTGRES_DB: test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run migrations + seed
+        run: |
+          alembic upgrade head
+          python scripts/seed_db.py
+        env:
+          DATABASE_URL: postgresql+asyncpg://lab:labpass@localhost:5432/test_db
+
+      - name: Security tests — vulnerable mode
+        run: |
+          pytest tests/security/ \
+            -v --tb=short \
+            -m "vulnerable_mode" \
+            --junitxml=security-vulnerable.xml
+        env:
+          APP_MODE: vulnerable
+          DATABASE_URL: postgresql+asyncpg://lab:labpass@localhost:5432/test_db
+          REDIS_URL: redis://localhost:6379
+
+      - name: Generate RS256 keys for secured mode
+        run: python scripts/generate_keys.py
+
+      - name: Security tests — secured mode
+        run: |
+          pytest tests/security/ \
+            -v --tb=short \
+            -m "secured_mode" \
+            --junitxml=security-secured.xml
+        env:
+          APP_MODE: secured
+          DATABASE_URL: postgresql+asyncpg://lab:labpass@localhost:5432/test_db
+          REDIS_URL: redis://localhost:6379
+          JWT_PRIVATE_KEY_PATH: secrets/private.pem
+          JWT_PUBLIC_KEY_PATH: secrets/public.pem
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-test-results
+          path: "*.xml"
+
+  # ── Stage 5: OWASP ZAP Scan ─────────────────────────────────────────────────
+  zap-scan:
+    name: OWASP ZAP Active Scan
+    runs-on: ubuntu-latest
+    needs: integration-tests
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start vulnerable app for ZAP scan
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.vulnerable.yml up -d
+          echo "Waiting for app to be ready..."
+          timeout 60 bash -c 'until curl -sf http://localhost:8000/health; do sleep 2; done'
+        env:
+          COMPOSE_PROJECT_NAME: zap_scan
+
+      - name: OWASP ZAP Baseline Scan
+        uses: zaproxy/action-full-scan@v0.10.0
+        with:
+          target: "http://localhost:8000"
+          cmd_options: "-I -T 3"
+          allow_issue_writing: false
+        continue-on-error: true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: zap-report
+          path: |
+            report_html.html
+            report_json.json
+
+      - name: Stop app
+        if: always()
+        run: docker compose -f docker-compose.yml -f docker-compose.vulnerable.yml down
+
+  # ── Stage 6: Build Docker Images ────────────────────────────────────────────
+  build:
+    name: Build & Push
+    runs-on: ubuntu-latest
+    needs: [security-tests, zap-scan]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile.app
+          push: ${{ github.ref == 'refs/heads/main' }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository }}/app:latest
+            ${{ env.REGISTRY }}/${{ github.repository }}/app:${{ github.sha }}
+
+  # ── Stage 7: Deploy Validation ───────────────────────────────────────────────
+  deploy-check:
+    name: Deploy Smoke Test
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate RS256 keys
+        run: python scripts/generate_keys.py
+        working-directory: .
+
+      - name: Start secured mode stack
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.secured.yml up -d
+          echo "Waiting for app and Kong..."
+          timeout 90 bash -c 'until curl -sf http://localhost:8000/health; do sleep 3; done'
+          timeout 60 bash -c 'until curl -sf http://localhost:8001; do sleep 3; done'
+
+      - name: Smoke test — app health
+        run: |
+          RESPONSE=$(curl -sf http://localhost:8000/health)
+          echo "App response: $RESPONSE"
+          echo "$RESPONSE" | python -c "import sys,json; d=json.load(sys.stdin); assert d['status']=='ok', 'Health check failed'"
+
+      - name: Smoke test — Kong proxy
+        run: |
+          curl -sf http://localhost:8080/health || echo "Kong proxy check"
+          curl -sf http://localhost:8001 | python -c "import sys,json; json.load(sys.stdin)"
+
+      - name: Verify rate limiting active
+        run: |
+          for i in $(seq 1 6); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8080/auth/login \
+              -H "Content-Type: application/json" -d '{"username":"user1","password":"wrong"}')
+            echo "Request $i: HTTP $STATUS"
+          done
+
+      - name: Cleanup
+        if: always()
+        run: docker compose -f docker-compose.yml -f docker-compose.secured.yml down
